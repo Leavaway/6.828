@@ -116,7 +116,14 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
-
+	int i;
+	env_free_list = NULL;
+	for(i=NENV-1;i>=0;i--){
+		envs[i].env_id = 0;
+		envs[i].env_status = ENV_FREE;
+		envs[i].env_link = env_free_list;
+		env_free_list = &envs[i];
+	}
 	// Per-CPU part of the initialization
 	env_init_percpu();
 }
@@ -179,8 +186,16 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	e->env_pgdir = (pde_t *) page2kva(p);
+	p->pp_ref++;
+	for(i=0;i<PDX(UTOP);i++){
+		e->env_pgdir[i] = 0;
+	}
+	for (i=PDX(UTOP);i < NPDENTRIES;i++) {
+         e->env_pgdir[i] = kern_pgdir[i];
+    }
 
-	// UVPT maps the env's own page table read-only.
+	// UVPT maps the env's own page table read-onlys.
 	// Permissions: kernel R, user R
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
 
@@ -267,6 +282,25 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+	// Round two ends of physical memory;
+	uintptr_t start = ROUNDDOWN((uintptr_t)va,PGSIZE);
+	uintptr_t end = ROUNDUP(((uintptr_t)va+len),PGSIZE);
+	int npages = (end - start) / PGSIZE;
+	struct PageInfo *p = NULL;
+	int i, res;
+	// According to number of pages, invoke mm functions to allocate pages from page_free_list and insert them to page table
+	for(i = 0; i < npages; i++){
+		p = page_alloc(0);
+		if(!p){
+			panic("allocation attempt fails");
+		}
+		res = page_insert(e->env_pgdir, p, (void *)(start + i * PGSIZE), PTE_W | PTE_U);
+		if(res < 0){
+			panic("page_insert failed");
+		}
+	}
+	
+
 }
 
 //
@@ -323,11 +357,44 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+	struct Elf *elfhdr = (struct Elf *) binary;
+    struct Proghdr *ph, *eph;
+	// Check whether this is a valid ELF
+    if (elfhdr->e_magic != ELF_MAGIC)
+        panic("elf header's magic is not correct\n");
+
+	e->env_tf.tf_eip = elfhdr->e_entry;
+	// Load each program segment (ignores ph flags)
+	ph = (struct Proghdr *) ((uint8_t *) elfhdr + elfhdr->e_phoff);
+	eph = ph + elfhdr->e_phnum;
+
+	// Change current active page diretory to env_pgdir
+	lcr3(PADDR(e->env_pgdir));
+
+	for (; ph < eph; ph++){
+		// Focus of ELF_PROG_LOAD which stores code and data
+		if (ph->p_type != ELF_PROG_LOAD) 
+            continue;
+        if (ph->p_filesz > ph->p_memsz)
+            panic("file size is greater than memory size\n");
+		// Allocate physical memory to p_va and add va to env's page table.
+		region_alloc(e, (void *)ph->p_va, ph->p_memsz);
+		// Write file to allocated physical memory and complete zero initialization.
+		memcpy((void *) ph->p_va, binary+ph->p_offset, ph->p_filesz);
+        memset((void *) ph->p_va + ph->p_filesz, 0, (ph->p_memsz - ph->p_filesz));
+	}
+		
+	// call the entry point from the ELF header
+	// note: does not return!
+
 
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	region_alloc(e, (void *) USTACKTOP - PGSIZE, PGSIZE);
+	// Change current active page diretory to kern_pgdir                                                                                                                                      
+    lcr3(PADDR(kern_pgdir));
 }
 
 //
@@ -341,6 +408,13 @@ void
 env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
+	struct Env * e = NULL;
+	int res = env_alloc(&e, 0);
+	if(res!=0){
+		panic("env_alloc failed\n");
+	}
+	load_icode(e, binary);
+	e->env_type = type;
 }
 
 //
@@ -457,6 +531,14 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
+	if(curenv && (curenv->env_status == ENV_RUNNING)){
+		curenv->env_status = ENV_RUNNABLE;
+	}
+	curenv = e;
+    curenv->env_status = ENV_RUNNING;
+    curenv->env_runs++;
+    lcr3(PADDR(curenv->env_pgdir));
+	env_pop_tf(&curenv->env_tf);
 
 	panic("env_run not yet implemented");
 }
