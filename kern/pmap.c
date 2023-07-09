@@ -265,7 +265,16 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
-
+	int i=0;
+	uintptr_t kstacktop_i;
+	for(;i<NCPU;i++){
+		kstacktop_i = KSTACKTOP - i * (KSTKGAP + KSTKSIZE);
+		boot_map_region(kern_pgdir,
+                        kstacktop_i - KSTKSIZE,                                                     
+                        ROUNDUP(KSTKSIZE, PGSIZE),
+                        PADDR(&percpu_kstacks[i]),
+                        PTE_W | PTE_P);
+	}
 }
 
 // --------------------------------------------------------------
@@ -318,7 +327,10 @@ page_init(void)
         // Mark the physical memory used by the kernel as in use
         else if (i * PGSIZE >= EXTPHYSMEM && i < first_free_page) {
             pages[i].pp_ref = 1;
-        }
+		// Leave MPENTRY_PADDR for entry code.
+        }else if (i == MPENTRY_PADDR / PGSIZE){
+			continue;
+		}
         // Otherwise, add to the free list
         else {
             pages[i].pp_ref = 0;
@@ -637,7 +649,15 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	size = ROUNDUP(size, PGSIZE);
+	if(base + size > MMIOLIM || base + size < base){
+		panic("reservation overflow");
+	}
+	void *result = (void *)base;
+
+	boot_map_region(kern_pgdir, base, size, pa, PTE_W|PTE_PCD|PTE_PWT);
+    base += size;
+    return result;
 }
 
 static uintptr_t user_mem_check_addr;
