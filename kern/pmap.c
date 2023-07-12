@@ -212,11 +212,12 @@ mem_init(void)
 	// we just set up the mapping anyway.
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
+
+
 	boot_map_region(kern_pgdir, KERNBASE, 0x100000000 - KERNBASE, 0, PTE_W | PTE_P);
 
 	// Initialize the SMP-related parts of the memory map
 	mem_init_mp();
-	
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
 
@@ -264,16 +265,15 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
-	size_t i;
-	size_t kstacktop_i;
-	for(i = 0; i < NCPU; i++) {
-		kstacktop_i = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
-		boot_map_region(kern_pgdir, 
-						kstacktop_i - KSTKSIZE, 
-						KSTKSIZE,
-						PADDR(&percpu_kstacks[i]), 
-						PTE_W);
-	
+	int i=0;
+	uintptr_t kstacktop_i;
+	for(;i<NCPU;i++){
+		kstacktop_i = KSTACKTOP - i * (KSTKGAP + KSTKSIZE);
+		boot_map_region(kern_pgdir,
+                        kstacktop_i - KSTKSIZE,                                                     
+                        ROUNDUP(KSTKSIZE, PGSIZE),
+                        PADDR(&percpu_kstacks[i]),
+                        PTE_W | PTE_P);
 	}
 }
 
@@ -327,10 +327,10 @@ page_init(void)
         // Mark the physical memory used by the kernel as in use
         else if (i * PGSIZE >= EXTPHYSMEM && i < first_free_page) {
             pages[i].pp_ref = 1;
-        }
 		// Leave MPENTRY_PADDR for entry code.
-		else if (i == MPENTRY_PADDR / PGSIZE)
-            continue;
+        }else if (i == MPENTRY_PADDR / PGSIZE){
+			continue;
+		}
         // Otherwise, add to the free list
         else {
             pages[i].pp_ref = 0;
