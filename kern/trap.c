@@ -167,6 +167,7 @@ trap_init_percpu(void)
 	// Set different esp and ss to different cpu's kernal stack area.
 	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - cpunum() * (KSTKGAP + KSTKSIZE);
 	thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
 
 	// Initialize the TSS slot of the gdt.
 	gdt[(GD_TSS0 >> 3) + cpunum()]= SEG16(STS_T32A, (uint32_t) (&(thiscpu->cpu_ts)),
@@ -255,6 +256,14 @@ trap_dispatch(struct Trapframe *tf)
             lapic_eoi();
             sched_yield();
             break;
+		case (IRQ_OFFSET + IRQ_KBD):
+			lapic_eoi();
+			kbd_intr();
+			break;
+		case (IRQ_OFFSET + IRQ_SERIAL):
+			lapic_eoi();
+			serial_intr();
+			break;
 		default:
 			// Unexpected trap: The user process or the kernel has a bug.
 			print_trapframe(tf);

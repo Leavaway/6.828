@@ -72,11 +72,13 @@ static int
 duppage(envid_t envid, unsigned pn)
 {
 	int r;
-
-	// LAB 4: Your code here.
 	pte_t pte = uvpt[pn];
 	void *addr = (void *)(pn * PGSIZE);
-	if((pte & PTE_W )||(pte & PTE_COW)){
+	if (uvpt[pn] & PTE_SHARE) {
+     	if((r = sys_page_map(thisenv->env_id, (void *) addr, envid, (void * )addr, uvpt[pn] & PTE_SYSCALL)) <0 ) 
+         	return r;
+	}
+	else if((pte & PTE_W )||(pte & PTE_COW)){
 		r = sys_page_map(sys_getenvid(), addr, envid, addr, PTE_U | PTE_P | PTE_COW);
 		if(r<0){
 			panic("duppage: page map failed\n");
